@@ -59,7 +59,15 @@
 <audio id="a" preload="none"></audio>
 
 <script>
-const SERVERS = ["de1","nl1","at1"].map(s => `https://${s}.api.radio-browser.info`);
+async function getServers() {
+  try {
+    const r = await fetch("https://all.api.radio-browser.info/json/servers");
+    const list = await r.json();
+    const names = [...new Set(list.map(s => s.name))].map(n => "https://" + n);
+    if (names.length) return names.sort(() => Math.random() - 0.5);
+  } catch(e) {}
+  return ["de1","de2","fi1","nl1","at1"].map(s => `https://${s}.api.radio-browser.info`);
+}
 const PATH = "/json/stations/search?countrycode=CL&lastcheckok=1&hidebroken=true&order=clickcount&reverse=true&limit=500";
 const $ = id => document.getElementById(id);
 const audio = $("a");
@@ -68,11 +76,13 @@ let favs = [];
 try { favs = JSON.parse(localStorage.getItem("favs") || "[]"); } catch(e) {}
 
 async function load() {
-  for (const s of SERVERS) {
+  const servers = await getServers();
+  for (const s of servers) {
     try {
       const r = await fetch(s + PATH);
       if (!r.ok) continue;
       const data = await r.json();
+      if (!Array.isArray(data) || !data.length) continue;
       const seen = new Set();
       stations = data.filter(x => {
         const u = x.url_resolved || "";
@@ -81,7 +91,16 @@ async function load() {
         if (seen.has(k)) return false;
         seen.add(k); return true;
       });
+      if (!stations.length) {
+        $("info").textContent = data.length + " emisoras con señal, pero ninguna con https";
+        return;
+      }
       render();
+      return;
+    } catch(e) {}
+  }
+  $("info").textContent = "No se pudo cargar la lista. Revisa tu conexión.";
+};
       return;
     } catch(e) {}
   }
