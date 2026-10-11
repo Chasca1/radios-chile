@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#111111">
+<title>Radios Chile</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family:system-ui,sans-serif; background:#111; color:#eee; padding-bottom:110px; }
+  header { position:sticky; top:0; background:#111; padding:12px; z-index:2; border-bottom:1px solid #2a2a2a; }
+  h1 { font-size:18px; margin:0 0 8px; }
+  input { width:100%; padding:10px; border-radius:8px; border:1px solid #333; background:#1c1c1c; color:#eee; font-size:16px; }
+  .tabs { display:flex; gap:8px; margin-top:8px; }
+  .tabs button { flex:1; padding:8px; border:0; border-radius:8px; background:#1c1c1c; color:#eee; font-size:14px; }
+  .tabs button.on { background:#e63946; }
+  #info { font-size:12px; color:#999; padding:8px 12px; }
+  .st { display:flex; align-items:center; gap:10px; padding:12px; border-bottom:1px solid #222; }
+  .st.play { background:#1f1a1a; }
+  .st .n { flex:1; min-width:0; }
+  .st .n b { display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .st .n small { color:#888; }
+  .fav { background:none; border:0; font-size:22px; color:#888; }
+  .fav.on { color:#ffc107; }
+  #bar { position:fixed; left:0; right:0; bottom:0; background:#1c1c1c; border-top:1px solid #333; padding:10px 12px; }
+  #now { font-size:14px; margin-bottom:6px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  #ctl { display:flex; gap:8px; align-items:center; }
+  #ctl button { padding:10px 16px; border:0; border-radius:8px; background:#e63946; color:#fff; font-size:16px; }
+  #ctl select { padding:10px; border-radius:8px; background:#111; color:#eee; border:1px solid #333; }
+  #msg { font-size:12px; color:#ffb4b4; margin-left:auto; }
+</style>
+</head>
+<body>
+<header>
+  <h1>📻 Radios Chile</h1>
+  <input id="q" type="search" placeholder="Buscar emisora o género…">
+  <div class="tabs">
+    <button id="tAll" class="on">Todas</button>
+    <button id="tFav">Favoritas</button>
+  </div>
+</header>
+<div id="info">Cargando emisoras…</div>
+<div id="list"></div>
+
+<div id="bar">
+  <div id="now">Elige una emisora</div>
+  <div id="ctl">
+    <button id="pp">▶</button>
+    <select id="sleep">
+      <option value="0">Sin temporizador</option>
+      <option value="15">Apagar en 15 min</option>
+      <option value="30">Apagar en 30 min</option>
+      <option value="60">Apagar en 60 min</option>
+    </select>
+    <span id="msg"></span>
+  </div>
+</div>
+<audio id="a" preload="none"></audio>
+
+<script>
+const SERVERS = ["de1","nl1","at1"].map(s => `https://${s}.api.radio-browser.info`);
+const PATH = "/json/stations/search?countrycode=CL&lastcheckok=1&hidebroken=true&order=clickcount&reverse=true&limit=500";
+const $ = id => document.getElementById(id);
+const audio = $("a");
+let stations = [], current = null, showFav = false, sleepTimer = null;
+let favs = [];
+try { favs = JSON.parse(localStorage.getItem("favs") || "[]"); } catch(e) {}
+
+async function load() {
+  for (const s of SERVERS) {
+    try {
+      const r = await fetch(s + PATH);
+      if (!r.ok) continue;
+      const data = await r.json();
+      const seen = new Set();
+      stations = data.filter(x => {
+        const u = x.url_resolved || "";
+        if (!u.startsWith("https://")) return false;
+        const k = x.name.trim().toLowerCase();
+        if (seen.has(k)) return false;
+        seen.add(k); return true;
+      });
+      render();
+      return;
+    } catch(e) {}
+  }
+  $("info").textContent = "No se pudo cargar la lista. Revisa tu conexión.";
+}
+
+function render() {
+  const t = $("q").value.trim().toLowerCase();
+  const rows = stations.filter(s =>
+    (!showFav || favs.includes(s.stationuuid)) &&
+    (!t || (s.name + " " + s.tags).toLowerCase().includes(t)));
+  $("info").textContent = `${rows.length} emisoras (${stations.length} con señal https)`;
+  $("list").innerHTML = "";
+  rows.forEach(s => {
+    const d = document.createElement("div");
+    d.className = "st" + (current && current.stationuuid === s.stationuuid ? " play" : "");
+    const tags = (s.tags || "").split(",").slice(0,3).join(", ");
+    d.innerHTML = `<div class="n"><b></b><small></small></div><button class="fav"></button>`;
+    d.querySelector("b").textContent = s.name.trim();
+    d.querySelector("small").textContent = tags;
+    const f = d.querySelector(".fav");
+    f.textContent = "★";
+    f.className = "fav" + (favs.includes(s.stationuuid) ? " on" : "");
+    f.onclick = e => { e.stopPropagation(); toggleFav(s.stationuuid); };
+    d.onclick = () => play(s);
+    $("list").appendChild(d);
+  });
+}
+
+function toggleFav(id) {
+  favs = favs.includes(id) ? favs.filter(x => x !== id) : [...favs, id];
+  try { localStorage.setItem("favs", JSON.stringify(favs)); } catch(e) {}
+  render();
+}
+
+function play(s) {
+  current = s;
+  $("msg").textContent = "";
+  audio.src = s.url_resolved;
+  audio.play().catch(() => $("msg").textContent = "No se pudo reproducir");
+  $("now").textContent = s.name.trim();
+  if ("mediaSession" in navigator) {
+    navigator.mediaSession.metadata = new MediaMetadata({ title: s.name.trim(), artist: "Radios Chile" });
+    navigator.mediaSession.setActionHandler("play", () => audio.play());
+    navigator.mediaSession.setActionHandler("pause", () => audio.pause());
+  }
+  render();
+}
+
+audio.onplay = () => $("pp").textContent = "⏸";
+audio.onpause = () => $("pp").textContent = "▶";
+audio.onerror = () => { if (current) $("msg").textContent = "Señal caída"; };
+$("pp").onclick = () => { if (!current) return; audio.paused ? audio.play() : audio.pause(); };
+$("q").oninput = render;
+$("tAll").onclick = () => { showFav = false; $("tAll").className = "on"; $("tFav").className = ""; render(); };
+$("tFav").onclick = () => { showFav = true; $("tFav").className = "on"; $("tAll").className = ""; render(); };
+$("sleep").onchange = e => {
+  clearTimeout(sleepTimer);
+  const m = +e.target.value;
+  if (m) sleepTimer = setTimeout(() => { audio.pause(); $("sleep").value = "0"; }, m * 60000);
+};
+load();
+</script>
+</body>
+</html>
