@@ -60,13 +60,8 @@
 
 <script>
 async function getServers() {
-  try {
-    const r = await fetch("https://all.api.radio-browser.info/json/servers");
-    const list = await r.json();
-    const names = [...new Set(list.map(s => s.name))].map(n => "https://" + n);
-    if (names.length) return names.sort(() => Math.random() - 0.5);
-  } catch(e) {}
-  return ["de1","de2","fi1","nl1","at1"].map(s => `https://${s}.api.radio-browser.info`);
+  return ["fi1","de2","nl1","at1","de1"]
+    .map(s => `https://${s}.api.radio-browser.info`);
 }
 const PATH = "/json/stations/search?countrycode=CL&lastcheckok=1&hidebroken=true&order=clickcount&reverse=true&limit=500";
 const $ = id => document.getElementById(id);
@@ -79,7 +74,7 @@ async function load() {
   const servers = await getServers();
   for (const s of servers) {
     try {
-      const r = await fetch(s + PATH);
+      const r = await fetch(s + PATH, { signal: AbortSignal.timeout(8000) });
       if (!r.ok) continue;
       const data = await r.json();
       if (!Array.isArray(data) || !data.length) continue;
@@ -101,12 +96,7 @@ async function load() {
   }
   $("info").textContent = "No se pudo cargar la lista. Revisa tu conexión.";
 };
-      return;
-    } catch(e) {}
-  }
-  $("info").textContent = "No se pudo cargar la lista. Revisa tu conexión.";
-}
-
+      
 function render() {
   const t = $("q").value.trim().toLowerCase();
   const rows = stations.filter(s =>
