@@ -41,7 +41,7 @@
 </head>
 <body>
 <header>
-  <h1>📻 Radios Chile</h1>
+  <h1>📻Chasca Radios Chile</h1>
   <input id="q" type="search" placeholder="Buscar emisora o género…">
   <div class="tabs">
     <button data-v="all" class="on">Todas</button>
@@ -157,7 +157,7 @@ function play(s) {
   audio.play().catch(() => $("msg").textContent = "No se pudo reproducir");
   $("now").textContent = s.name.trim();
   if ("mediaSession" in navigator) {
-    navigator.mediaSession.metadata = new MediaMetadata({ title: s.name.trim(), artist: "Radios Chile" });
+    navigator.mediaSession.metadata = new MediaMetadata({ title: s.name.trim(), artist: "Chasca Radios Chile" });
     navigator.mediaSession.setActionHandler("play", () => audio.play());
     navigator.mediaSession.setActionHandler("pause", () => audio.pause());
   }
