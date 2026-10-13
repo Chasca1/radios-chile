@@ -18,19 +18,24 @@
   .tabs { display:flex; gap:8px; margin-top:8px; }
   .tabs button { flex:1; padding:8px; border:0; border-radius:8px; background:#1c1c1c; color:#eee; font-size:14px; }
   .tabs button.on { background:#e63946; }
+  #addBtn { width:100%; margin-top:8px; padding:8px; border:1px dashed #555; border-radius:8px; background:none; color:#eee; font-size:14px; }
+  #add[hidden] { display:none; }
+  #add { margin-top:8px; display:flex; flex-direction:column; gap:8px; }
+  #save { padding:10px; border:0; border-radius:8px; background:#e63946; color:#fff; font-size:16px; }
+  #addMsg { font-size:12px; color:#ffb4b4; min-height:14px; }
   #info { font-size:12px; color:#999; padding:8px 12px; }
   .st { display:flex; align-items:center; gap:10px; padding:12px; border-bottom:1px solid #222; }
   .st.play { background:#1f1a1a; }
   .st .n { flex:1; min-width:0; }
   .st .n b { display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .st .n small { color:#888; }
-  .fav { background:none; border:0; font-size:22px; color:#888; }
+  .fav, .del { background:none; border:0; font-size:22px; color:#888; }
   .fav.on { color:#ffc107; }
   #bar { position:fixed; left:0; right:0; bottom:0; background:#1c1c1c; border-top:1px solid #333; padding:10px 12px; }
   #now { font-size:14px; margin-bottom:6px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   #ctl { display:flex; gap:8px; align-items:center; }
-  #ctl button { padding:10px 16px; border:0; border-radius:8px; background:#e63946; color:#fff; font-size:16px; }
-  #ctl select { padding:10px; border-radius:8px; background:#111; color:#eee; border:1px solid #333; }
+  #pp { padding:10px 16px; border:0; border-radius:8px; background:#e63946; color:#fff; font-size:16px; }
+  #sleep { padding:10px; border-radius:8px; background:#111; color:#eee; border:1px solid #333; }
   #msg { font-size:12px; color:#ffb4b4; margin-left:auto; }
 </style>
 </head>
@@ -39,8 +44,16 @@
   <h1>📻 Radios Chile</h1>
   <input id="q" type="search" placeholder="Buscar emisora o género…">
   <div class="tabs">
-    <button id="tAll" class="on">Todas</button>
-    <button id="tFav">Favoritas</button>
+    <button data-v="all" class="on">Todas</button>
+    <button data-v="fav">Favoritas</button>
+    <button data-v="mine">Mías</button>
+  </div>
+  <button id="addBtn">＋ Agregar emisora</button>
+  <div id="add" hidden>
+    <input id="nName" type="text" placeholder="Nombre (ej. Frecuencia Rock 95.3)">
+    <input id="nUrl" type="url" placeholder="Dirección del audio (https://…)">
+    <button id="save">Guardar emisora</button>
+    <div id="addMsg"></div>
   </div>
 </header>
 <div id="info">Cargando emisoras…</div>
@@ -62,16 +75,16 @@
 <audio id="a" preload="none"></audio>
 
 <script>
-async function getServers() {
-  return ["fi1","de2","nl1","at1","de1"]
-    .map(s => `https://${s}.api.radio-browser.info`);
-}
 const PATH = "/json/stations/search?countrycode=CL&lastcheckok=1&hidebroken=true&order=clickcount&reverse=true&limit=500";
+async function getServers() {
+  return ["fi1","de2","nl1","at1","de1"].map(s => `https://${s}.api.radio-browser.info`);
+}
 const $ = id => document.getElementById(id);
 const audio = $("a");
-let stations = [], current = null, showFav = false, sleepTimer = null;
-let favs = [];
-try { favs = JSON.parse(localStorage.getItem("favs") || "[]"); } catch(e) {}
+let stations = [], current = null, view = "all", sleepTimer = null, apiMsg = "cargando lista de internet…";
+function read(k) { try { return JSON.parse(localStorage.getItem(k) || "[]"); } catch(e) { return []; } }
+function save(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch(e) {} }
+let favs = read("favs"), custom = read("custom");
 
 async function load() {
   const servers = await getServers();
@@ -89,35 +102,43 @@ async function load() {
         if (seen.has(k)) return false;
         seen.add(k); return true;
       });
-      if (!stations.length) {
-        $("info").textContent = data.length + " emisoras con señal, pero ninguna con https";
-        return;
-      }
+      apiMsg = stations.length ? "" : "ninguna de la lista de internet tiene https";
       render();
       return;
     } catch(e) {}
   }
-  $("info").textContent = "No se pudo cargar la lista. Revisa tu conexión.";
-};
-      
+  apiMsg = "no se pudo cargar la lista de internet";
+  render();
+}
+
 function render() {
+  const all = [...custom, ...stations];
   const t = $("q").value.trim().toLowerCase();
-  const rows = stations.filter(s =>
-    (!showFav || favs.includes(s.stationuuid)) &&
-    (!t || (s.name + " " + s.tags).toLowerCase().includes(t)));
-  $("info").textContent = `${rows.length} emisoras (${stations.length} con señal https)`;
+  const rows = all.filter(s =>
+    (view === "all" || (view === "fav" && favs.includes(s.stationuuid)) || (view === "mine" && s.custom)) &&
+    (!t || ((s.name || "") + " " + (s.tags || "")).toLowerCase().includes(t)));
+  $("info").textContent = rows.length + " emisoras" + (apiMsg ? " · " + apiMsg : "");
   $("list").innerHTML = "";
   rows.forEach(s => {
     const d = document.createElement("div");
     d.className = "st" + (current && current.stationuuid === s.stationuuid ? " play" : "");
-    const tags = (s.tags || "").split(",").slice(0,3).join(", ");
-    d.innerHTML = `<div class="n"><b></b><small></small></div><button class="fav"></button>`;
+    const tags = (s.tags || "").split(",").slice(0, 3).join(", ");
+    d.innerHTML = `<div class="n"><b></b><small></small></div>` + (s.custom ? `<button class="del">🗑</button>` : "") + `<button class="fav">★</button>`;
     d.querySelector("b").textContent = s.name.trim();
     d.querySelector("small").textContent = tags;
     const f = d.querySelector(".fav");
-    f.textContent = "★";
     f.className = "fav" + (favs.includes(s.stationuuid) ? " on" : "");
     f.onclick = e => { e.stopPropagation(); toggleFav(s.stationuuid); };
+    const del = d.querySelector(".del");
+    if (del) del.onclick = e => {
+      e.stopPropagation();
+      if (confirm("¿Borrar " + s.name.trim() + "?")) {
+        custom = custom.filter(c => c.stationuuid !== s.stationuuid);
+        favs = favs.filter(x => x !== s.stationuuid);
+        save("custom", custom); save("favs", favs);
+        render();
+      }
+    };
     d.onclick = () => play(s);
     $("list").appendChild(d);
   });
@@ -125,7 +146,7 @@ function render() {
 
 function toggleFav(id) {
   favs = favs.includes(id) ? favs.filter(x => x !== id) : [...favs, id];
-  try { localStorage.setItem("favs", JSON.stringify(favs)); } catch(e) {}
+  save("favs", favs);
   render();
 }
 
@@ -143,20 +164,38 @@ function play(s) {
   render();
 }
 
+function setView(v) {
+  view = v;
+  document.querySelectorAll(".tabs button").forEach(b => b.className = b.dataset.v === v ? "on" : "");
+  render();
+}
+document.querySelectorAll(".tabs button").forEach(b => b.onclick = () => setView(b.dataset.v));
+
+$("addBtn").onclick = () => { $("add").hidden = !$("add").hidden; $("addMsg").textContent = ""; };
+$("save").onclick = () => {
+  const name = $("nName").value.trim(), url = $("nUrl").value.trim();
+  if (!name || !url) { $("addMsg").textContent = "Completa el nombre y la dirección."; return; }
+  if (!url.startsWith("https://")) { $("addMsg").textContent = "La dirección debe empezar con https://"; return; }
+  custom.unshift({ stationuuid: "c" + Date.now(), name: name, url_resolved: url, tags: "agregada por mí", custom: true });
+  save("custom", custom);
+  $("nName").value = ""; $("nUrl").value = "";
+  $("addMsg").textContent = "Guardada ✓";
+  setView("mine");
+};
+
 audio.onplay = () => $("pp").textContent = "⏸";
 audio.onpause = () => $("pp").textContent = "▶";
 audio.onerror = () => { if (current) $("msg").textContent = "Señal caída"; };
 $("pp").onclick = () => { if (!current) return; audio.paused ? audio.play() : audio.pause(); };
 $("q").oninput = render;
-$("tAll").onclick = () => { showFav = false; $("tAll").className = "on"; $("tFav").className = ""; render(); };
-$("tFav").onclick = () => { showFav = true; $("tFav").className = "on"; $("tAll").className = ""; render(); };
 $("sleep").onchange = e => {
   clearTimeout(sleepTimer);
   const m = +e.target.value;
   if (m) sleepTimer = setTimeout(() => { audio.pause(); $("sleep").value = "0"; }, m * 60000);
 };
+render();
 load();
-  if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js");
+if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js");
 </script>
 </body>
 </html>
